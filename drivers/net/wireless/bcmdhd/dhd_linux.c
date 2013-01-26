@@ -680,7 +680,7 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 
 	if(wifi_pm) {
 		power_mode = PM_FAST;
-		printk(KERN_DEBUG "[%s]: Wifi Power Management Policy changed to PM_FAST \n");
+		printk(KERN_DEBUG "[%s]: Wifi Power Management Policy changed to PM_FAST \n",__func__);
 	}
 
 	dhd_suspend_lock(dhd);
