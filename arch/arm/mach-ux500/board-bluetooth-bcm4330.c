@@ -41,7 +41,6 @@
 #define BT_LPM_ENABLE
 
 static struct rfkill *bt_rfkill;
-static int isHostWake = 0;
 
 struct bcm_bt_lpm {
 	int wake;
@@ -58,8 +57,6 @@ struct bcm_bt_lpm {
 
 static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
 {
-	int irq;
-
 	/* rfkill_ops callback. Turn transmitter on when blocked is false */
 	if (!blocked) {
 		pr_info("[BT] Bluetooth Power On.\n");
@@ -71,12 +68,6 @@ static int bcm4330_bt_rfkill_set_power(void *data, bool blocked)
 		pr_info("[BT] Bluetooth Power Off.\n");
 		gpio_set_value(BT_RST_N_GTI9060_R0_1, 0);
 		gpio_set_value(BT_VREG_EN_GTI9060_R0_1, 0);
-		irq = gpio_to_irq(BT_HOST_WAKE_GTI9060_R0_1);
-		if (isHostWake) {
-			irq_set_irq_wake(irq, 0);
-			free_irq(irq, NULL);
-			isHostWake--;
-		}
 	}
 	return 0;
 }
@@ -143,7 +134,7 @@ static irqreturn_t host_wake_isr(int irq, void *dev)
 
 	host_wake = gpio_get_value(BT_HOST_WAKE_GTI9060_R0_1);
 
-	irq_set_irq_type(irq, IRQ_TYPE_EDGE_BOTH);
+	irq_set_irq_type(irq, host_wake ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
 
 	if (!bt_lpm.uport) {
 		bt_lpm.host_wake = host_wake;
@@ -176,7 +167,6 @@ static int bcm_bt_lpm_init(struct platform_device *pdev)
 		pr_err("[BT] Request_host wake irq failed.\n");
 		return ret;
 	}
-	isHostWake++;
 
 	ret = irq_set_irq_wake(irq, 1);
 	if (ret) {
