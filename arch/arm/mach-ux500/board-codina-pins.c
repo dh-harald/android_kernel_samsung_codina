@@ -29,6 +29,7 @@
 #include "board-codina-regulators.h"
 #define IORA 1
 #ifdef IORA
+
  
   void breakpoint_iora_init()
 {
@@ -99,8 +100,8 @@ static pin_cfg_t codina_common_pins[] = {
 	GPIO29_U2_RXD	| PIN_INPUT_PULLUP,
 	GPIO30_U2_TXD	| PIN_OUTPUT_HIGH,
 
-	GPIO31_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
-	GPIO32_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
+	GPIO31_GPIO		| PIN_INPUT_PULLDOWN,	/* NFC FIRMWARE */ /*T*/
+	GPIO32_GPIO		| PIN_INPUT_PULLDOWN,	/* NFC IRQ */
 
 	/* MSP AB8500 */
 	GPIO33_MSP1_TXD,
@@ -116,7 +117,7 @@ static pin_cfg_t codina_common_pins[] = {
 /*	GPIO86_GPIO		| PIN_INPUT_PULLDOWN,	/ GPS_ON_OFF (R2) */ /* GPS_Joons */
 	GPIO86_GPIO		| PIN_OUTPUT_LOW,	/* GPS_ON_OFF */
 	GPIO87_GPIO		| PIN_OUTPUT_LOW,	/* TXS0206-29_EN */
-	GPIO88_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
+	GPIO88_GPIO		| PIN_INPUT_PULLDOWN,	/* NFC ON */ /*NC  T*/
 	GPIO89_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
 	GPIO90_GPIO		| PIN_INPUT_PULLDOWN,	/* SERVICE_AB8505 (OPEN) */
 
@@ -152,8 +153,8 @@ static pin_cfg_t codina_common_pins[] = {
 
 	GPIO149_GPIO		| PIN_OUTPUT_LOW,	/* RST_5M_CAM */
 
-	GPIO151_GPIO		| PIN_INPUT_PULLDOWN,	/* COMP_SCL */
-	GPIO152_GPIO		| PIN_INPUT_PULLDOWN,	/* COMP_SDA */
+	GPIO151_GPIO		| PIN_INPUT_PULLDOWN,	/* NFC_SCL GPIO I2C */ /*NC T*/
+	GPIO152_GPIO		| PIN_INPUT_PULLDOWN,	/* NFC_SDA GPIO I2C */ /*NC T */
 	GPIO153_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
 	GPIO154_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
 	GPIO155_GPIO		| PIN_INPUT_PULLDOWN,	/* NC */
@@ -373,12 +374,14 @@ static void __init gps_pins_init(void)
         	gpio_export(GPS_RST_N_CODINA_BRINGUP_R0_5, 1);
         	gpio_export_link(gps_dev, "GPS_nRST", GPS_RST_N_CODINA_BRINGUP_R0_5);
 	}
-	else if(system_rev == CODINA_R0_4) {
-		gpio_request(GPS_RST_N_CODINA_BRINGUP_R0_4, "GPS_nRST");
-        	gpio_direction_output(GPS_RST_N_CODINA_BRINGUP_R0_4, 1);
-        	gpio_export(GPS_RST_N_CODINA_BRINGUP_R0_4, 1);
-        	gpio_export_link(gps_dev, "GPS_nRST", GPS_RST_N_CODINA_BRINGUP_R0_4);
-	}
+#if defined(CONFIG_MACH_CODINA_EURO)
+    else if(system_rev == CODINA_R0_4) {
+            gpio_request(GPS_RST_N_CODINA_BRINGUP_R0_4, "GPS_nRST");
+            gpio_direction_output(GPS_RST_N_CODINA_BRINGUP_R0_4, 1);
+            gpio_export(GPS_RST_N_CODINA_BRINGUP_R0_4, 1);
+            gpio_export_link(gps_dev, "GPS_nRST", GPS_RST_N_CODINA_BRINGUP_R0_4);
+    }
+#endif
 	else
 	{
 		gpio_request(GPS_RST_N_CODINA_BRINGUP, "GPS_nRST");
@@ -504,7 +507,7 @@ static pin_cfg_t codina_r0_0_power_save_bank0[] = {
 
 	GPIO29_GPIO | PIN_INPUT_PULLUP,  /* IF_RXD */
 	GPIO30_GPIO | PIN_OUTPUT_HIGH,  /* IF_TXD */
-	GPIO31_GPIO | PIN_INPUT_PULLDOWN,  /* NC */
+	/* GPIO31_GPIO | PIN_INPUT_PULLDOWN,  */ /* Commented SNMC NFC */
 };
 
 static pin_cfg_t codina_r0_0_sdmmc_sleep[] = {
@@ -544,9 +547,10 @@ static pin_cfg_t codina_common_sleep_table[] = {
 	
 	GPIO16_GPIO | PIN_INPUT_NOPULL, 
 	GPIO17_GPIO | PIN_INPUT_NOPULL, 
-	GPIO29_U2_RXD| PIN_OUTPUT_LOW, 
-	GPIO30_U2_TXD| PIN_OUTPUT_LOW, 
-	GPIO32_GPIO | PIN_INPUT_PULLDOWN,  /* NC */
+	/* GPIO29_U2_RXD| PIN_INPUT_PULLDOWN, 
+	GPIO30_U2_TXD| PIN_OUTPUT_LOW, */ 
+	GPIO31_GPIO | PIN_INPUT_PULLDOWN,/*NC t*/
+	GPIO32_GPIO | PIN_INPUT_PULLDOWN,  /* NFC IRQ */
 	GPIO33_GPIO | PIN_OUTPUT_LOW,
 	GPIO34_GPIO | PIN_INPUT_NOPULL,
 	GPIO35_GPIO | PIN_INPUT_NOPULL,
@@ -576,7 +580,8 @@ static pin_cfg_t codina_common_sleep_table[] = {
 	GPIO85_GPIO | PIN_INPUT_PULLDOWN,
 	GPIO86_GPIO | PIN_OUTPUT_LOW, /* EN_GPS */ /* GPS_Joons */
 	/*GPIO87_GPIO | PIN_OUTPUT_LOW,*/	/* TXS0206-29_EN */
-	GPIO88_GPIO | PIN_INPUT_PULLDOWN,  /* NC */
+        /*GPIO88_GPIO | PIN_INPUT_PULLDOWN, */ /* commented SNMC NFC NC */
+	GPIO88_GPIO | PIN_INPUT_PULLDOWN,/*NC t*/
 	GPIO89_GPIO | PIN_INPUT_PULLDOWN,  /* NC */
 
 	GPIO90_GPIO | PIN_INPUT_PULLDOWN,  /* SERVICE_AB8505 (OPEN) */
@@ -614,8 +619,8 @@ static pin_cfg_t codina_common_sleep_table[] = {
 	GPIO149_GPIO | PIN_OUTPUT_LOW,  /* RST_5M_CAM */
 
 	GPIO150_GPIO | PIN_OUTPUT_LOW,	/* LCD_MCLK */
-	GPIO151_GPIO | PIN_INPUT_PULLDOWN,	/* COMP_SCL_1V8 */ 
-	GPIO152_GPIO | PIN_INPUT_PULLDOWN,	/* COMP_SDA_1V8 */ 
+	GPIO151_GPIO | PIN_INPUT_PULLDOWN,	/* NFC_SCL_1V8 */ /*NC*/
+	GPIO152_GPIO | PIN_INPUT_PULLDOWN,	/* NFC_SDA_1V8 */ /*NC*/
 	GPIO153_GPIO | PIN_INPUT_PULLDOWN,	/* NC */
 	GPIO154_GPIO | PIN_INPUT_PULLDOWN,	/* NC */
 	GPIO155_GPIO | PIN_INPUT_PULLDOWN,	/* NC */
@@ -656,8 +661,12 @@ static pin_cfg_t codina_common_sleep_table[] = {
 	GPIO207_GPIO | PIN_INPUT_PULLDOWN,  /* NC */
 	GPIO208_GPIO | PIN_OUTPUT_LOW,  /* WLAN_SDIO_CLK */
 /*	GPIO209_GPIO | PIN_OUTPUT_LOW, */ /* BT_RST_N */
-	GPIO209_GPIO | PIN_OUTPUT_LOW,    /* GBF_RESETN */ /* GPS_Joons */ 
+#if defined(CONFIG_MACH_CODINA_CHN)||defined(CONFIG_MACH_CODINA_EURO)
+/*	GPIO209_GPIO | PIN_OUTPUT_HIGH,  */  /* BT_RST_N */ /* jine.wang */
 
+#else
+	GPIO209_GPIO | PIN_OUTPUT_HIGH,   /* GBF_RESETN */ /* GPS_Joons */
+#endif
 	GPIO210_GPIO | PIN_INPUT_PULLUP,
 	GPIO211_GPIO | PIN_INPUT_PULLUP,
 	GPIO212_GPIO | PIN_INPUT_PULLUP,
@@ -702,6 +711,7 @@ static pin_cfg_t codina_common_sleep_table[] = {
  * This is a temporary solution until all drivers are
  * controlling their pin settings when in inactive mode.
  */
+
 static void codina_pins_suspend_force(void)
 {
 	nmk_config_pins(codina_r0_0_power_save_bank0,
@@ -819,7 +829,7 @@ void __init ssg_pins_init(void)
 	}
 	else {
 		nmk_config_pins(codina_r0_4_pins,
-			ARRAY_SIZE(codina_r0_4_pins));
+			ARRAY_SIZE(codina_r0_4_pins));  
 	}
 
 	ux500_pins_add(codina_r0_0_lookup_pins,

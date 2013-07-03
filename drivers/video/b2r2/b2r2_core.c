@@ -50,6 +50,7 @@
 #include <linux/err.h>
 #include <linux/kref.h>
 #include <linux/ktime.h>
+#include <linux/mutex.h>
 
 #include "b2r2_internal.h"
 #include "b2r2_core.h"
@@ -167,6 +168,8 @@ static void stop_hw_timer(struct b2r2_core *core,
 
 static int init_hw(struct b2r2_core *core);
 static void exit_hw(struct b2r2_core *core);
+
+static DEFINE_MUTEX(reset_mutex);
 
 /* Tracking release bug... */
 #ifdef DEBUG_CHECK_ADDREF_RELEASE
@@ -2691,71 +2694,29 @@ static int b2r2_remove(struct platform_device *pdev)
 }
 
 /**
- * b2r2_reset_hold() - This routine resets b2r2 in a controlled fashion and
- *                     holds the cores in a suspended state.
- *
+ * b2r2_core_reset_hold() - This routine resets b2r2 in a controlled fashion and
+ *                          holds the cores in a suspended state.
+ *                          The reset will happen after a period of time.
  */
-int b2r2_reset_hold(void)
+void b2r2_core_reset_hold(void)
 {
-	struct b2r2_core *core;
-	int i;
-
-	for (i = 0; i < B2R2_MAX_NBR_DEVICES; i++) {
-		core = b2r2_core[i];
-		if (core) {
-			mutex_lock(&core->domain_lock);
-			core->lockdown = true;
-			core->domain_request_count = 0;
-			exit_hw(core);
-			clk_disable(core->b2r2_clock);
-			regulator_disable(core->b2r2_reg);
-			/* VANA is tighly coupled to DSS EPOD */
-			if (core->vana_reg)
-				regulator_disable(core->vana_reg);
-			core->domain_enabled = false;
-
-			/* Flush B2R2 work queue (call all callbacks) */
-			flush_workqueue(core->work_queue);
-
-#ifdef HANDLE_TIMEOUTED_JOBS
-			cancel_delayed_work(&core->timeout_work);
-#endif
-
-			/*
-			 * Flush B2R2 work queue (call all callbacks for
-			 * cancelled jobs)
-			 */
-			flush_workqueue(core->work_queue);
-
-			/* Make sure power is turned off */
-			cancel_delayed_work_sync(&core->domain_disable_work);
-
-			mutex_unlock(&core->domain_lock);
-		}
-	}
-
-	return 0;
+	/* take the lock and don't unlock until reset_release */
+	mutex_lock(&reset_mutex);
 }
 
 /**
- * b2r2_reset_release() - This routine lets go of the b2r2 reset
+ * b2r2_core_reset_release() - This routine lets go of the b2r2 reset
  *
  */
-int b2r2_reset_release(void)
+void b2r2_core_reset_release(void)
 {
-	struct b2r2_core *core;
-	int i;
+	mutex_unlock(&reset_mutex);
+}
 
-	for (i = 0; i < B2R2_MAX_NBR_DEVICES; i++) {
-		core = b2r2_core[i];
-		if (core) {
-			mutex_lock(&core->domain_lock);
-			core->lockdown = false;
-			mutex_unlock(&core->domain_lock);
-		}
-	}
-
-	return 0;
+void b2r2_core_on_reset_completion_wait(void)
+{
+	mutex_lock(&reset_mutex);
+	mutex_unlock(&reset_mutex);
 }
 
 /**

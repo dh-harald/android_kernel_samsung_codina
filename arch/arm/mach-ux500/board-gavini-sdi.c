@@ -206,7 +206,7 @@ static int sdi0_ios_handler(struct device *dev, struct mmc_ios *ios,  enum rpm_s
 	case MMC_POWER_ON:
 		/* Enable level shifter */
 		gpio_direction_output(TXS0206_EN_GAVINI_R0_0, 1);
-		udelay(100);
+		udelay(500);
 		break;
 	case MMC_POWER_OFF:
 		/* Disable level shifter */
@@ -226,9 +226,10 @@ static struct mmci_platform_data ssg_sdi0_data = {
 				MMC_CAP_MMC_HIGHSPEED,
 	.gpio_cd	= T_FLASH_DETECT_GAVINI_R0_0,
 	.gpio_wp	= -1,
+	.levelshifter = true,
 	.cd_invert	= true,
 	.sigdir 	= MCI_ST_FBCLKEN,
-
+	
 #ifdef CONFIG_STE_DMA40
 	.dma_filter	= stedma40_filter,
 	.dma_rx_param	= &sdi0_dma_cfg_rx,
@@ -357,11 +358,13 @@ static void suspend_resume_handler_sdi2(struct mmc_host *host, bool suspend)
 
 static struct mmci_platform_data ssg_sdi2_data = {
 	.ocr_mask	= MMC_VDD_165_195,
-	.f_max		= 50000000,
+		.f_max		= 100000000,
 	.capabilities	= MMC_CAP_4_BIT_DATA |
 				MMC_CAP_8_BIT_DATA |
-				MMC_CAP_MMC_HIGHSPEED |
-				MMC_CAP_ERASE,
+				MMC_CAP_MMC_HIGHSPEED|
+				MMC_CAP_ERASE |
+				MMC_CAP_1_8V_DDR |
+				MMC_CAP_UHS_DDR50,
 	.capabilities2	= MMC_CAP2_NO_SLEEP_CMD,
 //	.pm_flags	= MMC_PM_KEEP_POWER,
 	.gpio_cd	= -1,

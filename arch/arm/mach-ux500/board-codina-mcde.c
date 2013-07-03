@@ -52,9 +52,6 @@ static struct ux500_pins *dpi_pins;
 
 static struct fb_info *primary_fbi;
 
-unsigned int battpwroff_charging;
-EXPORT_SYMBOL(battpwroff_charging);
-
 static int __init startup_graphics_setup(char *str)
 {
 	if (get_option(&str, &display_initialized_during_boot) != 1)
@@ -77,19 +74,6 @@ static int __init lcdtype_setup(char *str)
 	return 1;
 }
 __setup("lcdtype=", lcdtype_setup);
-
-static int __init battpwroff_charging_boot_mode(char *mode)
-{
-	if (strncmp(mode, "1", 1) == 0)
-		battpwroff_charging = true;
-	else
-		battpwroff_charging = false;
-
-	pr_info("%s : %s", __func__, battpwroff_charging ?
-				"POWER OFF CHARGING MODE" : "NORMAL");
-	return 1;
-}
-__setup("lpm_boot=", battpwroff_charging_boot_mode);
 
 static struct mcde_port port0 = {
 	.type			= MCDE_PORTTYPE_DPI,
@@ -483,6 +467,7 @@ int __init init_codina_display_devices(void)
 		codina_dpi_pri_display_info.video_mode.vsw = 2;
 		codina_dpi_pri_display_info.video_mode.vbp = 8;
 		codina_dpi_pri_display_info.video_mode.vfp = 18;
+		codina_dpi_pri_display_info.sleep_out_delay = 50;
 	} else {
 		generic_display0.name = LCD_DRIVER_NAME_S6D27A1;
 		codina_dpi_pri_display_info.video_mode.hsw = 2;
@@ -491,6 +476,7 @@ int __init init_codina_display_devices(void)
 		codina_dpi_pri_display_info.video_mode.vsw = 2;
 		codina_dpi_pri_display_info.video_mode.vbp = 11;
 		codina_dpi_pri_display_info.video_mode.vfp = 10;
+		codina_dpi_pri_display_info.sleep_out_delay = 120;
 	}
 	
 	ret = mcde_display_device_register(&generic_display0);

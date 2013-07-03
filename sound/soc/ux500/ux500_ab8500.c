@@ -140,19 +140,19 @@ struct amic_conf {
 	char *name;
 };
 
-#ifdef CONFIG_MACH_GAVINI
-static struct amic_conf amic_info[3] = {
+//#ifdef CONFIG_MACH_GAVINI
+/*static struct amic_conf amic_info[3] = {
         { REGULATOR_AMIC2, false, "amic1a" },
         { REGULATOR_AMIC1, false, "amic1b" },
         { REGULATOR_AMIC2, false, "amic2" }
-};
-#else /* default config, valid for Janice */
+};*/
+//#else /* default config, valid for Janice */
 static struct amic_conf amic_info[3] = {
         { REGULATOR_AMIC1, false, "amic1a" },
         { REGULATOR_AMIC1, false, "amic1b" },
         { REGULATOR_AMIC2, false, "amic2" }
 };
-#endif
+//#endif
 
 static DEFINE_MUTEX(amic_conf_lock);
 

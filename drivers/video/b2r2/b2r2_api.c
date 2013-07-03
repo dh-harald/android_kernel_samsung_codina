@@ -1109,6 +1109,8 @@ int b2r2_blt_request(int handle,
 	if (!atomic_inc_not_zero(&blt_refcount.refcount))
 		return -ENOSYS;
 
+	b2r2_core_on_reset_completion_wait();
+
 	/* Exclude some currently unsupported cases */
 	if ((user_req->flags & B2R2_BLT_FLAG_REPORT_WHEN_DONE) ||
 			(user_req->flags & B2R2_BLT_FLAG_REPORT_PERFORMANCE) ||

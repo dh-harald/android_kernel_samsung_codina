@@ -103,6 +103,9 @@
 #include <mach/sec_common.h>
 #include <mach/sec_log_buf.h>
 
+#ifdef CONFIG_NFC_PN544
+#include <linux/pn544.h>
+#endif
 #ifdef CONFIG_USB_ANDROID
 #define PUBLIC_ID_BACKUPRAM1 (U8500_BACKUPRAM1_BASE + 0x0FC0)
 #define USB_SERIAL_NUMBER_LEN 31
@@ -819,7 +822,7 @@ static int __init bt404_ts_init(void)
 	}
 	gpio_direction_input(TSP_INT_CODINA_R0_0);
 
-	bt404_ts_pdata.panel_type = (system_rev <= CODINA_TMO_R0_4) ?
+	bt404_ts_pdata.panel_type = (board_id >= 12) ?
 						GFF_PANEL : EX_CLEAR_PANEL;
 
 	printk(KERN_INFO "bt404: initialize pins\n");
@@ -940,28 +943,35 @@ static struct i2c_board_info __initdata codina_r0_0_gpio_i2c4_devices_r0[] = {
 #endif
 };
 
-/*static struct i2c_gpio_platform_data codina_gpio_i2c5_data = {
-	.sda_pin = NFC_SDA_CODINA_R0_0,
-	.scl_pin = NFC_SCL_CODINA_R0_0,
-	.udelay = 3,*/	/* closest to 400KHz */
-/*};*/
+#ifdef CONFIG_NFC_PN544
+static struct i2c_gpio_platform_data codina_gpio_i2c5_data = {
+	.sda_pin = COMP_SDA_CODINA_R0_0,
+	.scl_pin = COMP_SCL_CODINA_R0_0,
+	.udelay = 3,	/* closest to 400KHz */
+};
 
-/*static struct platform_device codina_gpio_i2c5_pdata = {
+static struct platform_device codina_gpio_i2c5_pdata = {
 	.name = "i2c-gpio",
 	.id = 5,
 	.dev = {
 		.platform_data = &codina_gpio_i2c5_data,
 	},
-};*/
+};
 
-/*static struct i2c_board_info __initdata codina_r0_0_gpio_i2c5_devices[] = {*/
-/* TBD - NFC */
-/*#if 0
+static struct pn544_i2c_platform_data pn544_pdata __initdata = {
+	.irq_gpio = NFC_IRQ_JANICE_R0_0,
+	.ven_gpio = NFC_EN_JANICE_R0_0,
+	.firm_gpio = NFC_FIRM_JANICE_R0_0,
+};
+
+static struct i2c_board_info __initdata codina_r0_0_gpio_i2c5_devices[] = {
 	{
-		I2C_BOARD_INFO("", 0x30),
+		I2C_BOARD_INFO("pn544", 0x2b),
+		.irq = GPIO_TO_IRQ(NFC_IRQ_CODINA_R0_0),
+		.platform_data = &pn544_pdata,
 	},
+};
 #endif
-};*/
 
 static struct i2c_gpio_platform_data codina_gpio_i2c6_data = {
 	.sda_pin = SENSOR_SDA_CODINA_R0_0,
@@ -1007,6 +1017,7 @@ static struct i2c_board_info __initdata codina_r0_0_gpio_i2c6_devices_01[] = {
 #endif
 };
 
+#ifndef CONFIG_NFC_PN544
 static struct i2c_gpio_platform_data codina_gpio_i2c8_data = {
 	.sda_pin = COMP_SDA_CODINA_R0_0,
 	.scl_pin = COMP_SCL_CODINA_R0_0,
@@ -1020,7 +1031,7 @@ static struct platform_device codina_gpio_i2c8_pdata = {
 		.platform_data = &codina_gpio_i2c8_data,
 	},
 };
-
+#endif
 #if defined(CONFIG_SENSORS_HSCD) || defined(CONFIG_SENSORS_ACCEL) || defined(CONFIG_SENSORS_HSCDTD008A)
 static struct platform_device alps_pdata = {
 	.name = "alps-input",
@@ -1704,21 +1715,21 @@ static struct sec_jack_zone sec_jack_zones[] = {
 /* to support 3-buttons earjack */
 static struct sec_jack_buttons_zone sec_jack_buttons_zones[] = {
 	{
-		/* 0 <= adc <=82, stable zone */
+		/* 0 <= adc <=94, stable zone */
 		.code		= KEY_MEDIA,
 		.adc_low	= 0,
-		.adc_high	= 82,
+		.adc_high	= 94,
 	},
 	{
-		/* 83 <= adc <= 180, stable zone */
+		/* 110 <= adc <= 95, stable zone */
 		.code		= KEY_VOLUMEUP,
-		.adc_low	= 83,
-		.adc_high	= 180,
+		.adc_low	= 95,
+		.adc_high	= 199,
 	},
 	{
-		/* 181 <= adc <= 450, stable zone */
+		/* 200 <= adc <= 450, stable zone */
 		.code		= KEY_VOLUMEDOWN,
-		.adc_low	= 181,
+		.adc_low	= 200,
 		.adc_high	= 450,
 	},
 };
@@ -2282,9 +2293,11 @@ static void __init codina_i2c_init(void)
 		platform_device_register(&codina_gpio_i2c4_pdata);
 	i2c_register_board_info(4,
 		ARRAY_AND_SIZE(codina_r0_0_gpio_i2c4_devices));
-	/*platform_device_register(&codina_gpio_i2c5_pdata);
+#ifdef CONFIG_NFC_PN544
+	platform_device_register(&codina_gpio_i2c5_pdata);
 	i2c_register_board_info(5,
-		ARRAY_AND_SIZE(codina_r0_0_gpio_i2c5_devices));*/
+		ARRAY_AND_SIZE(codina_r0_0_gpio_i2c5_devices));
+#endif
 	if	(system_rev >= CODINA_TMO_R0_1)	{
 		platform_device_register(&codina_gpio_i2c6_pdata_01);
 		i2c_register_board_info(6,
@@ -2298,9 +2311,11 @@ static void __init codina_i2c_init(void)
 	i2c_register_board_info(7,
 		ARRAY_AND_SIZE(codina_r0_0_gpio_i2c7_devices));
 	if	(system_rev >= CODINA_TMO_R0_1)	{
+#ifndef CONFIG_NFC_PN544
 		platform_device_register(&codina_gpio_i2c8_pdata);
 	i2c_register_board_info(8,
 		ARRAY_AND_SIZE(codina_r0_0_gpio_i2c8_devices));
+#endif
 	}	else	{
 	i2c_register_board_info(4,
 		ARRAY_AND_SIZE(codina_r0_0_gpio_i2c4_devices_r0));

@@ -618,6 +618,8 @@ static void usb_switch_notify_clients(struct work_struct *work)
 	}
 
 	/* Desktop Dock Support */
+#ifndef  CONFIG_MACH_CODINA_CHN
+/*weichang.dong remove Desktop Dock Support for codina chn 4.1.2  */
 	if (instance->last_event == (USB_SWITCH_CONNECTION_EVENT | EXTERNAL_AV_CABLE)) {
 		if (id == FC_9485) {	
 			printk(KERN_INFO "%s: GPIO #200 Value : %x\n", __func__, gpio_get_value(200));
@@ -628,7 +630,10 @@ static void usb_switch_notify_clients(struct work_struct *work)
 			write_FSA9480_register(instance, FSA9490_CONTROL_REGISTER, c);
 		}	
 		switch_set_state(&switch_dock, 1);
-	} else if (instance->last_event == USB_SWITCH_DISCONNECTION_EVENT &&
+	} else 
+#endif
+
+    if (instance->last_event == USB_SWITCH_DISCONNECTION_EVENT &&
 			instance->prev_event == (USB_SWITCH_CONNECTION_EVENT | EXTERNAL_AV_CABLE)) {
 		if (id == FC_9485) {	
 			printk(KERN_INFO "%s: GPIO #200 Value : %x\n", __func__, gpio_get_value(200));

@@ -1425,7 +1425,7 @@ static void mmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		break;
 	case MMC_POWER_ON:
 		pwr |= MCI_PWR_ON;
-
+            mdelay(10);
 		if (host->plat->ios_handler &&
 			host->plat->ios_handler(mmc_dev(mmc), ios, RPM_ACTIVE))
 				dev_err(mmc_dev(mmc), "platform ios_handler failed\n");

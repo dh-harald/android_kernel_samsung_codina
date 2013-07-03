@@ -1418,15 +1418,7 @@ static ssize_t mpu3050_acc_read(struct device *dev,
 #ifdef CONFIG_MPU_SENSORS_BMA222
 		sensor_i2c_read(this_client->adapter, 0x08, 0x02, 6, acc_data);
 #elif defined(CONFIG_MPU_SENSORS_BMA222E)
-	if (mldl_cfg->accel_is_suspended == 1 ||
-		(mldl_cfg->dmp_is_running == 0 &&
-		mldl_cfg->accel_is_suspended == 0)) {
 		sensor_i2c_read(this_client->adapter, 0x18, 0x02, 6, acc_data);
-	} else if (mldl_cfg->dmp_is_running &&
-			mldl_cfg->accel_is_suspended == 0) {
-		sensor_i2c_read(this_client->adapter,
-			DEFAULT_MPU_SLAVEADDR, 0x23, 6, acc_data);
-		}
 #endif
 	for (j = 0; j < 3; j++) {
 		acc_bma[j] = (BMA222_GET_BITSLICE(acc_data[2*j+1],

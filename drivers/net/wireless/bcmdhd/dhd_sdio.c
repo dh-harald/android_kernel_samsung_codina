@@ -1582,6 +1582,7 @@ dhdsdio_txpkt(dhd_bus_t *bus, void *pkt, uint chan, bool free_pkt, bool queue_on
 	uint16 len, pad1 = 0;
 	uint32 swheader;
 	uint retries = 0;
+	uint32 real_pad = 0;
 	bcmsdh_info_t *sdh;
 	void *new;
 	int i;
@@ -1664,7 +1665,7 @@ dhdsdio_txpkt(dhd_bus_t *bus, void *pkt, uint chan, bool free_pkt, bool queue_on
 		/* Software tag: channel, sequence number, data offset */
 		swheader = ((chan << SDPCM_CHANNEL_SHIFT) & SDPCM_CHANNEL_MASK) |
 			((bus->tx_seq + bus->glom_cnt) % SDPCM_SEQUENCE_WRAP) |
-		        (((pad1 + SDPCM_HDRLEN) << SDPCM_DOFFSET_SHIFT) & SDPCM_DOFFSET_MASK);
+			(((pad1 + SDPCM_HDRLEN) << SDPCM_DOFFSET_SHIFT) & SDPCM_DOFFSET_MASK);
 		htol32_ua_store(swheader, frame + SDPCM_FRAMETAG_LEN + SDPCM_HWEXT_LEN);
 		htol32_ua_store(0, frame + SDPCM_FRAMETAG_LEN + SDPCM_HWEXT_LEN + sizeof(swheader));
 
@@ -1687,91 +1688,96 @@ dhdsdio_txpkt(dhd_bus_t *bus, void *pkt, uint chan, bool free_pkt, bool queue_on
 			bus->glom_cnt++;
 			return BCME_OK;
 		} else {
-				/* Raise len to next SDIO block to eliminate tail command */
-				if (bus->roundup && bus->blocksize &&
+			/* Raise len to next SDIO block to eliminate tail command */
+			if (bus->roundup && bus->blocksize &&
 					((bus->glom_total_len + len) > bus->blocksize)) {
-					uint16 pad2 = bus->blocksize -
-						((bus->glom_total_len + len) % bus->blocksize);
-					if ((pad2 <= bus->roundup) && (pad2 < bus->blocksize)) {
-							len += pad2;
-					} else {
-					}
-				} else if ((bus->glom_total_len + len) % DHD_SDALIGN) {
-					len += DHD_SDALIGN
-					    - ((bus->glom_total_len + len) % DHD_SDALIGN);
+				uint16 pad2 = bus->blocksize -
+					((bus->glom_total_len + len) % bus->blocksize);
+				if ((pad2 <= bus->roundup) && (pad2 < bus->blocksize)) {
+					len += pad2;
+				} else {
 				}
-				if (forcealign && (len & (ALIGNMENT - 1))) {
-					len = ROUNDUP(len, ALIGNMENT);
-				}
+			} else if ((bus->glom_total_len + len) % DHD_SDALIGN) {
+				len += DHD_SDALIGN
+					- ((bus->glom_total_len + len) % DHD_SDALIGN);
+			}
+			if (forcealign && (len & (ALIGNMENT - 1))) {
+				len = ROUNDUP(len, ALIGNMENT);
+			}
 
-				/* Hardware extention tag */
-				/* 2byte frame length, 1byte-, 1byte frame flag,
-				 * 2byte-hdrlength, 2byte padlenght
-				 */
-				hwheader1 = (act_len - SDPCM_FRAMETAG_LEN) | (1 << 24);
-				hwheader2 = (len - act_len) << 16;
-				htol32_ua_store(hwheader1, frame + SDPCM_FRAMETAG_LEN);
-				htol32_ua_store(hwheader2, frame + SDPCM_FRAMETAG_LEN + 4);
+			/* Hardware extention tag */
+			/* 2byte frame length, 1byte-, 1byte frame flag,
+			 * 2byte-hdrlength, 2byte padlenght
+			 */
+			hwheader1 = (act_len - SDPCM_FRAMETAG_LEN) | (1 << 24);
+			hwheader2 = (len - act_len) << 16;
+			htol32_ua_store(hwheader1, frame + SDPCM_FRAMETAG_LEN);
+			htol32_ua_store(hwheader2, frame + SDPCM_FRAMETAG_LEN + 4);
 
-				/* Post the frame pointer to sdio glom array */
-				dhd_bcmsdh_glom_post(bus, frame, len);
-				/* Save the pkt pointer in bus glom array */
-				bus->glom_pkt_arr[bus->glom_cnt] = pkt;
-				bus->glom_cnt++;
-				bus->glom_total_len += len;
+			/* Post the frame pointer to sdio glom array */
+			dhd_bcmsdh_glom_post(bus, frame, len);
+			/* Save the pkt pointer in bus glom array */
+			bus->glom_pkt_arr[bus->glom_cnt] = pkt;
+			bus->glom_cnt++;
+			bus->glom_total_len += len;
 
-				/* Update the total length on the first pkt */
-				frame_tmp = (uint8*)PKTDATA(osh, bus->glom_pkt_arr[0]);
-				*(uint16*)frame_tmp = htol16(bus->glom_total_len);
-				*(((uint16*)frame_tmp) + 1) = htol16(~bus->glom_total_len);
+			/* Update the total length on the first pkt */
+			frame_tmp = (uint8*)PKTDATA(osh, bus->glom_pkt_arr[0]);
+			*(uint16*)frame_tmp = htol16(bus->glom_total_len);
+			*(((uint16*)frame_tmp) + 1) = htol16(~bus->glom_total_len);
 		}
 	} else
 #endif /* BCMSDIOH_TXGLOM */
 	{
-	/* Software tag: channel, sequence number, data offset */
-	swheader = ((chan << SDPCM_CHANNEL_SHIFT) & SDPCM_CHANNEL_MASK) | bus->tx_seq |
-	        (((pad1 + SDPCM_HDRLEN) << SDPCM_DOFFSET_SHIFT) & SDPCM_DOFFSET_MASK);
-	htol32_ua_store(swheader, frame + SDPCM_FRAMETAG_LEN);
-	htol32_ua_store(0, frame + SDPCM_FRAMETAG_LEN + sizeof(swheader));
+		uint32 act_len = len;
+		/* Software tag: channel, sequence number, data offset */
+		swheader = ((chan << SDPCM_CHANNEL_SHIFT) & SDPCM_CHANNEL_MASK) | bus->tx_seq |
+			(((pad1 + SDPCM_HDRLEN) << SDPCM_DOFFSET_SHIFT) & SDPCM_DOFFSET_MASK);
+		htol32_ua_store(swheader, frame + SDPCM_FRAMETAG_LEN);
+		htol32_ua_store(0, frame + SDPCM_FRAMETAG_LEN + sizeof(swheader));
 
 #ifdef DHD_DEBUG
-	if (PKTPRIO(pkt) < ARRAYSIZE(tx_packets)) {
-		tx_packets[PKTPRIO(pkt)]++;
-	}
-	if (DHD_BYTES_ON() &&
-	    (((DHD_CTL_ON() && (chan == SDPCM_CONTROL_CHANNEL)) ||
-	      (DHD_DATA_ON() && (chan != SDPCM_CONTROL_CHANNEL))))) {
-		prhex("Tx Frame", frame, len);
-	} else if (DHD_HDRS_ON()) {
-		prhex("TxHdr", frame, MIN(len, 16));
-	}
+		if (PKTPRIO(pkt) < ARRAYSIZE(tx_packets)) {
+			tx_packets[PKTPRIO(pkt)]++;
+		}
+		if (DHD_BYTES_ON() &&
+				(((DHD_CTL_ON() && (chan == SDPCM_CONTROL_CHANNEL)) ||
+				  (DHD_DATA_ON() && (chan != SDPCM_CONTROL_CHANNEL))))) {
+			prhex("Tx Frame", frame, len);
+		} else if (DHD_HDRS_ON()) {
+			prhex("TxHdr", frame, MIN(len, 16));
+		}
 #endif
 
 #ifndef BCMSPI
-	/* Raise len to next SDIO block to eliminate tail command */
-	if (bus->roundup && bus->blocksize && (len > bus->blocksize)) {
-		uint16 pad2 = bus->blocksize - (len % bus->blocksize);
-		if ((pad2 <= bus->roundup) && (pad2 < bus->blocksize))
+		/* Raise len to next SDIO block to eliminate tail command */
+		if (bus->roundup && bus->blocksize && (len > bus->blocksize)) {
+			uint16 pad2 = bus->blocksize - (len % bus->blocksize);
+			if ((pad2 <= bus->roundup) && (pad2 < bus->blocksize))
 #ifdef NOTUSED
-			if (pad2 <= PKTTAILROOM(osh, pkt))
+				if (pad2 <= PKTTAILROOM(osh, pkt))
 #endif /* NOTUSED */
-				len += pad2;
-	} else if (len % DHD_SDALIGN) {
-		len += DHD_SDALIGN - (len % DHD_SDALIGN);
-	}
+					len += pad2;
+		} else if (len % DHD_SDALIGN) {
+			len += DHD_SDALIGN - (len % DHD_SDALIGN);
+		}
 #endif  /* BCMSPI */
 
-	/* Some controllers have trouble with odd bytes -- round to even */
-	if (forcealign && (len & (ALIGNMENT - 1))) {
+		/* Some controllers have trouble with odd bytes -- round to even */
+		if (forcealign && (len & (ALIGNMENT - 1))) {
 #ifdef NOTUSED
-		if (PKTTAILROOM(osh, pkt))
+			if (PKTTAILROOM(osh, pkt))
 #endif
-			len = ROUNDUP(len, ALIGNMENT);
+				len = ROUNDUP(len, ALIGNMENT);
 #ifdef NOTUSED
-		else
-			DHD_ERROR(("%s: sending unrounded %d-byte packet\n", __FUNCTION__, len));
+			else
+				DHD_ERROR(("%s: sending unrounded %d-byte packet\n", __FUNCTION__, len));
 #endif
-	}
+		}
+		real_pad = len - act_len;
+		if (skb_pad(pkt, real_pad)) {
+			DHD_ERROR(("padding error size %d\n", real_pad));
+		}
 	}
 
 	do {
@@ -2241,7 +2247,7 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 	htol32_ua_store(0, frame + SDPCM_FRAMETAG_LEN + sizeof(swheader));
 	}
 	if (!TXCTLOK(bus)) {
-		DHD_INFO(("%s: No bus credit bus->tx_max %d, bus->tx_seq %d\n",
+		DHD_ERROR(("%s: No bus credit bus->tx_max %d, bus->tx_seq %d\n",
 			__FUNCTION__, bus->tx_max, bus->tx_seq));
 		bus->ctrl_frame_stat = TRUE;
 		/* Send from dpc */
@@ -2350,6 +2356,7 @@ done:
 	return ret ? -EIO : 0;
 }
 
+char _dbg_io_name_buf[20] = {0,};
 int
 dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 {
@@ -2370,6 +2377,11 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 	bcopy(bus->rxctl, msg, MIN(msglen, rxlen));
 	bus->rxlen = 0;
 	dhd_os_sdunlock(bus->dhd);
+
+	if (timeleft < 4)
+	{		
+		_dbg_io_name_buf[19] = '\0';
+	}		
 
 	if (rxlen) {
 		DHD_CTL(("%s: resumed on rxctl frame, got %d expected %d\n",

@@ -1760,7 +1760,7 @@ static void get_fw_ver_bin(void *device_data)
 {
 	struct mms_ts_info *info = (struct mms_ts_info *)device_data;
 	struct i2c_client *client = info->client;
-	u16 buff;
+	u16 buff[3];
 	int ret;
 
 	set_default_result(info);
@@ -1771,10 +1771,13 @@ static void get_fw_ver_bin(void *device_data)
 			"fail to load firmware (%d)\n", ret);
 		goto out;
 	}
-	buff = info->fw_img->core_ver;
+	buff[0] = info->fw_img->core_ver;
+	buff[1] = info->fw_img->private_ver;
+	buff[2] = info->fw_img->public_ver;
+	
 	mms_ts_fw_unload_built_in(info);
 
-	sprintf(info->cmd_buff, "0x%X", buff);
+	sprintf(info->cmd_buff, "0x%X-0x%X-0x%X", buff[0], buff[1], buff[2]);
 	set_cmd_result(info, info->cmd_buff, strlen(info->cmd_buff));
 	info->cmd_state = OK;
 
@@ -1809,7 +1812,7 @@ static void get_fw_ver_ic(void *device_data)
 		goto out;
 	}
 
-	sprintf(info->cmd_buff, "0x%X", fw_ver[0]);
+	sprintf(info->cmd_buff, "0x%X-0x%X-0x%X", fw_ver[0], fw_ver[1],fw_ver[2]);
 	set_cmd_result(info, info->cmd_buff, strlen(info->cmd_buff));
 	info->cmd_state = OK;
 

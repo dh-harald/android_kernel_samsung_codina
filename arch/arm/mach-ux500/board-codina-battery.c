@@ -20,6 +20,7 @@
 #define SEC_CHARGER_IRQ IRQ_EINT(1)
 
 bool power_off_charging;
+EXPORT_SYMBOL(power_off_charging);
 struct notifier_block cable_nb;
 struct notifier_block cable_accessory_nb;
 extern int micro_usb_register_notifier(struct notifier_block *nb);

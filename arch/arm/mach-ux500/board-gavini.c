@@ -1790,21 +1790,21 @@ static struct sec_jack_zone sec_jack_zones[] = {
 /* to support 3-buttons earjack */
 static struct sec_jack_buttons_zone sec_jack_buttons_zones[] = {
 	{
-		/* 0 <= adc <=82, stable zone */
+		/* 0 <= adc <=90, stable zone */
 		.code		= KEY_MEDIA,
 		.adc_low	= 0,
-		.adc_high	= 82,
+		.adc_high	= 90,
 	},
 	{
-		/* 83 <= adc <= 180, stable zone */
+		/* 91 <= adc <= 200, stable zone */
 		.code		= KEY_VOLUMEUP,
-		.adc_low	= 83,
-		.adc_high	= 180,
+		.adc_low	= 91,
+		.adc_high	= 200,
 	},
 	{
-		/* 181 <= adc <= 450, stable zone */
+		/* 201 <= adc <= 450, stable zone */
 		.code		= KEY_VOLUMEDOWN,
-		.adc_low	= 181,
+		.adc_low	= 201,
 		.adc_high	= 450,
 	},
 };

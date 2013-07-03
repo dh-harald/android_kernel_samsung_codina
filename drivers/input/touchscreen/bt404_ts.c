@@ -772,7 +772,7 @@ bool bt404_check_fw_update(struct bt404_ts_data *data)
 	dev_info(&data->client->dev,
 		"reg ver: cur= 0x%X, new= 0x%X\n", ver_ic, ver_new);
 
-	if (ver_ic < ver_new)
+	if (ver_ic != ver_new)
 		return true;
 
 	return false;
@@ -1619,7 +1619,9 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 	s16 *s16data;
 	s16 data_checksum;
 	s16 check_value;
+#ifdef TSP_VERBOSE_DEBUG
 	int i;
+#endif
 	u16 addr, val;
 	u16 status;
 
@@ -1683,6 +1685,67 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 		goto out_esd_start;
 	}
 
+	if(!(status & 0x800F)) {
+		dev_err(&client->dev, "%s: invalid status (0x%X)\n", __func__,
+									status);
+		goto out_esd_start;
+	}
+
+	if ((status >> 1) & 0b111) {
+		/* touch screen interrupt*/
+
+		ret = bt404_ts_read_data(client, BT404_POINT_REG,
+					(u8 *)(&data->touch_info),
+					sizeof(struct _ts_zinitix_point_info));
+		if (ret < 0) {
+			dev_err(&client->dev, "%s: err: rd (points)\n",
+								__func__);
+			goto out_esd_start;
+		}
+#if !defined(CONFIG_MACH_CODINA_EURO) && !defined(CONFIG_MACH_CODINA_CHN)
+		if (data->pdata->panel_type == EX_CLEAR_PANEL) {
+			int i = 0;
+
+			s16data = (s16 *)(&data->touch_info);
+			data_checksum = 0;
+
+			for (i = 0; i < sizeof(struct _ts_zinitix_point_info) / 2; i++)
+				data_checksum  += s16data[i];
+
+			ret = bt404_ts_read_data(client, 0x12E, (u8 *)(&check_value), 2);
+
+			if (data_checksum != check_value) {
+				dev_info(&client->dev, "data check sum error _ position.\n");
+
+				goto out_esd_start;
+			}
+		}
+#endif
+		if (!((status >> 15) & 0x1)) {
+			ret = bt404_ts_write_cmd(client, BT404_CLEAR_INT_STATUS_CMD);
+			if (ret < 0)
+				dev_err(&client->dev, "%s: err: cmd (clr int)\n",
+									__func__);
+		}
+
+#ifdef TSP_VERBOSE_DEBUG
+		for (i = 0; i < data->cap_info.max_finger; i++) {
+			u8 sub_status = data->touch_info.coord[i].sub_status;
+			if (sub_status & 0x1 || (sub_status >> 3) & 0x1)
+				dev_info(&client->dev,
+				"%1d: 0x%2X|%3d,%3d(%3d)\n",
+				i, sub_status, data->touch_info.coord[i].x,
+				data->touch_info.coord[i].y,
+				data->touch_info.coord[i].width);
+		}
+
+#endif
+
+		bt404_ts_report_touch_data(data, false);
+		memcpy((char *)&data->reported_touch_info,
+					(char *)&data->touch_info,
+					sizeof(struct _ts_zinitix_point_info));
+	}
 	if ((status >> 15) & 0x1) {
 		/* touch key interrupt*/
 		bool need_report = false;
@@ -1744,62 +1807,6 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 		data->reported_key_val = val;
 
 		input_sync(data->input_dev_tk);
-
-		goto out_esd_start;
-
-	} else if ((status >> 1) & 0b111) {
-		/* touch screen interrupt*/
-
-		ret = bt404_ts_read_data(client, BT404_POINT_REG,
-					(u8 *)(&data->touch_info),
-					sizeof(struct _ts_zinitix_point_info));
-		if (ret < 0) {
-			dev_err(&client->dev, "%s: err: rd (points)\n",
-								__func__);
-			goto out_esd_start;
-		}
-#if !defined(CONFIG_MACH_CODINA_EURO) && !defined(CONFIG_MACH_CODINA_CHN)
-		s16data = (s16 *)(&data->touch_info);
-		data_checksum = 0;
-
-		for (i = 0; i < sizeof(struct _ts_zinitix_point_info) / 2; i++)
-			data_checksum  += s16data[i];
-
-		ret = bt404_ts_read_data(client, 0x12E, (u8 *)(&check_value), 2);
-
-		if (data_checksum != check_value) {
-			dev_info(&client->dev, "data check sum error _ position.\n");
-
-			goto out_esd_start;
-		}
-#endif
-
-		ret = bt404_ts_write_cmd(client, BT404_CLEAR_INT_STATUS_CMD);
-		if (ret < 0)
-			dev_err(&client->dev, "%s: err: cmd (clr int)\n",
-								__func__);
-
-#ifdef TSP_VERBOSE_DEBUG
-		for (i = 0; i < data->cap_info.max_finger; i++) {
-			u8 sub_status = data->touch_info.coord[i].sub_status;
-			if (sub_status & 0x1 || (sub_status >> 3) & 0x1)
-				dev_info(&client->dev,
-				"%1d: 0x%2X|%3d,%3d(%3d)\n",
-				i, sub_status, data->touch_info.coord[i].x,
-				data->touch_info.coord[i].y,
-				data->touch_info.coord[i].width);
-		}
-
-#endif
-
-		bt404_ts_report_touch_data(data, false);
-		memcpy((char *)&data->reported_touch_info,
-					(char *)&data->touch_info,
-					sizeof(struct _ts_zinitix_point_info));
-	} else {
-		dev_err(&client->dev, "%s: invalid status (0x%X)\n", __func__,
-									status);
-		goto out_esd_start;
 	}
 
 	if (data->work_state == NORMAL)
@@ -2610,6 +2617,24 @@ static ssize_t menu_key_state_show(struct device *dev,
 	dev_info(&client->dev, "%s: %d\n", __func__, val);
 	return snprintf(buf, 5, "%d", val);
 }
+static ssize_t tkey_rawcounter_show1(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct bt404_ts_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	u8 addr = 0x00A9;
+	u16 val = 0xffff;
+	int ret;
+
+	/* back key */
+	ret = bt404_ts_read_data(client, addr, (u8 *)&val, 2);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s: err: rd (key event)\n", __func__);
+		return -1;
+	}
+
+	return snprintf(buf, 5, "%d", val);
+}
 
 static ssize_t tkey_threshold_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -2629,6 +2654,24 @@ static ssize_t tkey_threshold_show(struct device *dev,
 
 	dev_info(&client->dev, "%s: %d\n", __func__, val);
 	return snprintf(buf, 5, "%d\n", val);
+}
+static ssize_t tkey_rawcounter_show0(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct bt404_ts_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	u8 addr = 0x00A8;
+	u16 val = 0xffff;
+	int ret;
+
+	/* menu key */
+	ret = bt404_ts_read_data(client, addr, (u8 *)&val, 2);
+	if (ret < 0) {
+		dev_err(&client->dev, "%s: err: rd (key event)\n", __func__);
+		return -1;
+	}
+
+	return snprintf(buf, 5, "%d", val);
 }
 
 #ifdef TSP_FACTORY
@@ -2840,6 +2883,68 @@ out:
 	return ;
 }
 
+/* For I8160 - codina_euro_open */
+
+#if defined(CONFIG_MACH_CODINA_EURO)
+
+static void get_fw_ver_bin(void *device_data)
+{
+	struct bt404_ts_data *data = (struct bt404_ts_data *)device_data;
+	struct i2c_client *client = data->client;
+	u16 buff;
+
+	set_default_result(data);
+
+	buff = (u16)(data->fw_data[FW_VER_OFFSET + 2]
+				| (data->fw_data[FW_VER_OFFSET + 3] << 8));
+
+	sprintf(data->cmd_buff, "0x%X", buff);
+	set_cmd_result(data, data->cmd_buff, strlen(data->cmd_buff));
+	data->cmd_state = 2;
+
+	dev_info(&client->dev, "%s: \"%s\"(%d)\n", __func__,
+				data->cmd_buff,	strlen(data->cmd_buff));
+	return;
+}
+
+static void get_fw_ver_ic(void *device_data)
+{
+	struct bt404_ts_data *data = (struct bt404_ts_data *)device_data;
+	struct i2c_client *client = data->client;
+	u16 buff;
+	int ret;
+
+	set_default_result(data);
+
+	buff = 0xffff;
+	ret = bt404_ts_read_data(client, BT404_REG_VER,
+					(u8 *)&buff, 2);
+	if (ret < 0) {
+		dev_err(&data->client->dev, "%s: err: rd (reg ver)\n",
+								__func__);
+		goto out;
+	}
+
+	sprintf(data->cmd_buff, "0x%X", buff);
+	set_cmd_result(data, data->cmd_buff, strlen(data->cmd_buff));
+	data->cmd_state = 2;
+
+	dev_info(&client->dev, "%s: \"%s\"(%d)\n", __func__,
+				data->cmd_buff,	strlen(data->cmd_buff));
+
+	return;
+
+out:
+	sprintf(data->cmd_buff, "%s", "NG");
+	set_cmd_result(data, data->cmd_buff, strlen(data->cmd_buff));
+	data->cmd_state = 3;
+
+	dev_info(&client->dev, "%s: fail to read fw ver\n", __func__);
+	return ;
+}
+
+#else
+
 static void get_fw_ver_bin(void *device_data)
 {
 	struct bt404_ts_data *data = (struct bt404_ts_data *)device_data;
@@ -2927,6 +3032,8 @@ out:
 	dev_info(&client->dev, "%s: fail to read fw ver\n", __func__);
 	return ;
 }
+
+#endif
 
 static void get_threshold(void *device_data)
 {
@@ -3627,10 +3734,14 @@ out:
 
 static DEVICE_ATTR(touchkey_back, S_IRUGO, back_key_state_show, NULL);
 static DEVICE_ATTR(touchkey_menu, S_IRUGO, menu_key_state_show, NULL);
+static DEVICE_ATTR(touchkey_raw_data1, S_IRUGO, tkey_rawcounter_show1, NULL) ;
+static DEVICE_ATTR(touchkey_raw_data0, S_IRUGO, tkey_rawcounter_show0, NULL) ;
 static DEVICE_ATTR(touchkey_threshold, S_IRUGO, tkey_threshold_show, NULL);
 static struct attribute *touchkey_attributes[] = {
 	&dev_attr_touchkey_back.attr,
 	&dev_attr_touchkey_menu.attr,
+        &dev_attr_touchkey_raw_data1.attr,
+	&dev_attr_touchkey_raw_data0.attr,
 	&dev_attr_touchkey_threshold.attr,
 	NULL,
 };

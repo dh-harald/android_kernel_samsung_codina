@@ -46,6 +46,7 @@
 /* for debugging */
 #undef DEBUG
 
+#define PROXIMITY_NAME	"GP2A030A"
 #ifdef ESD_DEFENCE_CODE
 #define LIMIT_WAITING_COUNT	25
 #define LIMIT_RESET_COUNT	5
@@ -59,6 +60,12 @@
 
 #define LIGHT_BUFFER_NUM	5
 
+#define OFFSET_ARRAY_LENGTH		10
+#define OFFSET_FILE_PATH	"/efs/prox_cal"
+
+#define DEFAULT_LO_THRESHOLD    0x07 /* sharp recommanded Loff */
+#define DEFAULT_HI_THRESHOLD    0x08 /* sharp recommanded Lon */
+
 struct opt_state {
 	struct i2c_client *client;
 };
@@ -68,6 +75,7 @@ struct gp2a_data {
 	struct input_dev *light_input_dev;
 	struct work_struct proximity_work;	/* for proximity sensor */
 	struct mutex ligt_mutex;
+	struct mutex data_mutex;
 	struct delayed_work light_work;
 	struct device *proximity_dev;
 	struct device *light_dev;
@@ -89,6 +97,12 @@ struct gp2a_data {
 	int light_level_state;
 	bool light_first_level;
 	char proximity_detection;
+	/* Auto Calibration */
+    int offset_value;
+    int cal_result;
+    int threshold_high;
+    int proximity_value;
+    bool offset_cal_high;  
 #ifdef ESD_DEFENCE_CODE
 	int reset_cnt;
 	int zero_cnt;
@@ -133,9 +147,9 @@ static u8 gp2a_original_image[COL][2] = {
 	/*	{0x05 , 0x00}, */
 	/*	{0x06 , 0xFF}, */
 	/*	{0x07 , 0xFF}, */
-	{0x08, 0x09},		/* PS mode LTH(Loff): (??mm) */
+	{0x08, 0x0D},		/* PS mode LTH(Loff): (??mm) */
 	{0x09, 0x00},		/* PS mode LTH(Loff) : */
-	{0x0A, 0x0C},		/* PS mode HTH(Lon) : (??mm) */
+	{0x0A, 0x0F},		/* PS mode HTH(Lon) : (??mm) */
 	{0x0B, 0x00},		/* PS mode HTH(Lon) : */
 	/* {0x13 , 0x08}, by sharp for internal calculation (type:0) */
 	/*alternating mode (PS+ALS), TYPE=1
@@ -155,6 +169,7 @@ static int lightsensor_get_adc(struct gp2a_data *data);
 static int lightsensor_onoff(u8 onoff, struct gp2a_data *data);
 static int lightsensor_get_adcvalue(struct gp2a_data *data);
 static int opt_i2c_init(void);
+static int proximity_open_offset(struct gp2a_data *data);
 
 static ssize_t proximity_enable_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -171,6 +186,8 @@ static ssize_t proximity_enable_store(struct device *dev,
 
 	unsigned long value = 0;
 	char input;
+	int thrd = 0;
+	int ret = 0;
 	int err = 0;
 
 	err = strict_strtoul(buf, 10, &value);
@@ -198,6 +215,20 @@ static ssize_t proximity_enable_store(struct device *dev,
 
 		msleep(20);
 		proximity_onoff(1, data);
+		ret = proximity_open_offset(data);
+        if (ret < 0 && ret != -ENOENT)
+        {
+			pr_err("%s: proximity_open_offset() failed\n", __func__);
+        }
+        else
+        {
+            thrd = gp2a_original_image[3][1]+(data->offset_value);
+       		opt_i2c_write(gp2a_original_image[3][0], &thrd, 
+				data->pdata->addr, data->pdata->adapt_num);
+            thrd = gp2a_original_image[5][1]+(data->offset_value);
+       		opt_i2c_write(gp2a_original_image[5][0], &thrd,
+				data->pdata->addr, data->pdata->adapt_num);
+	    }
 		enable_irq_wake(data->irq);
 		msleep(20);
 
@@ -382,6 +413,340 @@ static ssize_t light_enable_store(struct device *dev,
 	return count;
 }
 
+static int proximity_open_offset(struct gp2a_data *data)
+{
+	struct file *offset_filp = NULL;
+	int err = 0;
+	mm_segment_t old_fs;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	offset_filp = filp_open(OFFSET_FILE_PATH, O_RDONLY, 0666);
+	if (IS_ERR(offset_filp)) {
+		pr_err("%s: no offset file\n", __func__);
+		err = PTR_ERR(offset_filp);
+		if (err != -ENOENT)
+			pr_err("%s: Can't open cancelation file\n", __func__);
+		set_fs(old_fs);
+		return err;
+	}
+
+	err = offset_filp->f_op->read(offset_filp,
+		(char *)&data->offset_value, sizeof(u8), &offset_filp->f_pos);
+	if (err != sizeof(u8)) {
+		pr_err("%s: Can't read the cancel data from file\n", __func__);
+		err = -EIO;
+	}
+
+	pr_err("%s: data->offset_value = %d\n",
+		__func__, data->offset_value);
+	filp_close(offset_filp, current->files);
+	set_fs(old_fs);
+
+	return err;
+}
+
+static int proximity_adc_read(struct gp2a_data *gp2a)
+{
+	int sum[OFFSET_ARRAY_LENGTH];
+	int i = 0;
+	int avg = 0;
+	int min = 0;
+	int max = 0;
+	int total = 0;
+    int D2_data = 0;
+    unsigned char get_D2_data[2]={0,};//test
+
+	mutex_lock(&gp2a->data_mutex);
+	for (i = 0; i < OFFSET_ARRAY_LENGTH; i++) {
+        mdelay(50);
+        opt_i2c_read(0x10, get_D2_data, sizeof(get_D2_data),
+			gp2a->pdata->addr, gp2a->pdata->adapt_num);
+        D2_data =(get_D2_data[1] << 8) | get_D2_data[0];
+        sum[i] = D2_data;
+		if (i == 0) {
+			min = sum[i];
+			max = sum[i];
+		} else {
+			if (sum[i] < min)
+				min = sum[i];
+			else if (sum[i] > max)
+				max = sum[i];
+		}
+		total += sum[i];
+	}
+	mutex_unlock(&gp2a->data_mutex);
+
+	total -= (min + max);
+	avg = (int)(total / (OFFSET_ARRAY_LENGTH - 2));
+    pr_err("%s: offset = %d\n", __func__, avg);
+
+	return avg;
+}
+
+static int proximity_store_offset(struct device *dev, bool do_calib)
+{
+	struct gp2a_data *gp2a = dev_get_drvdata(dev);
+	struct file *offset_filp = NULL;
+	mm_segment_t old_fs;
+	int err = 0;
+    int xtalk_avg = 0;
+    int offset_change = 0;
+    int thrd = 0;
+	if (do_calib) {
+    	/* tap offset button */
+        /* get offset value */
+        xtalk_avg = proximity_adc_read(gp2a);
+        offset_change = gp2a_original_image[5][1] - DEFAULT_HI_THRESHOLD;
+        if(xtalk_avg < offset_change){ //don't need to calibrate
+            /* calibration result */
+            gp2a->cal_result = 0;
+            return err;
+        }
+        gp2a->offset_value = xtalk_avg - offset_change;
+        /* update threshold */
+        thrd = gp2a_original_image[3][1]+(gp2a->offset_value);
+       	opt_i2c_write(gp2a_original_image[3][0], &thrd, 
+			gp2a->pdata->addr, gp2a->pdata->adapt_num);        
+        thrd = gp2a_original_image[5][1]+(gp2a->offset_value);
+       	opt_i2c_write(gp2a_original_image[5][0], &thrd,
+			gp2a->pdata->addr, gp2a->pdata->adapt_num);
+        /* calibration result */
+        gp2a->cal_result = 1;
+	}
+    else{
+        /* tap reset button */
+        gp2a->offset_value = 0;
+        /* update threshold */
+       	opt_i2c_write(gp2a_original_image[3][0], &gp2a_original_image[3][1],
+       		gp2a->pdata->addr, gp2a->pdata->adapt_num);
+       	opt_i2c_write(gp2a_original_image[5][0], &gp2a_original_image[5][1],
+			gp2a->pdata->addr, gp2a->pdata->adapt_num);
+        /* calibration result */
+        gp2a->cal_result = 2;
+    }
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	offset_filp = filp_open(OFFSET_FILE_PATH,
+			O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	if (IS_ERR(offset_filp)) {
+		pr_err("%s: Can't open prox_offset file\n", __func__);
+		set_fs(old_fs);
+		err = PTR_ERR(offset_filp);
+		return err;
+	}
+	err = offset_filp->f_op->write(offset_filp,
+		(char *)&gp2a->offset_value, sizeof(u8), &offset_filp->f_pos);
+	if (err != sizeof(u8)) {
+		pr_err("%s: Can't write the offset data to file\n", __func__);
+		err = -EIO;
+	}
+	filp_close(offset_filp, current->files);
+	set_fs(old_fs);
+	return err;
+}
+
+static int proximity_store_offset2(struct device *dev, int change_on)
+{
+	struct gp2a_data *gp2a = dev_get_drvdata(dev);
+	struct file *offset_filp = NULL;
+	mm_segment_t old_fs;
+	int err = 0;
+    int thrd = 0;
+
+    gp2a->offset_value = change_on;
+    /* update threshold */
+    thrd = gp2a_original_image[3][1]+(gp2a->offset_value);
+  	opt_i2c_write(gp2a_original_image[3][0], &thrd,
+		gp2a->pdata->addr, gp2a->pdata->adapt_num);        
+    thrd = gp2a_original_image[5][1]+(gp2a->offset_value);
+   	opt_i2c_write(gp2a_original_image[5][0], &thrd,
+		gp2a->pdata->addr, gp2a->pdata->adapt_num);
+    /* calibration result */
+    gp2a->cal_result = 1;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	offset_filp = filp_open(OFFSET_FILE_PATH,
+			O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	if (IS_ERR(offset_filp)) {
+		pr_err("%s: Can't open prox_offset file\n", __func__);
+		set_fs(old_fs);
+		err = PTR_ERR(offset_filp);
+		return err;
+	}
+
+	err = offset_filp->f_op->write(offset_filp,
+		(char *)&gp2a->offset_value, sizeof(u8), &offset_filp->f_pos);
+	if (err != sizeof(u8)) {
+		pr_err("%s: Can't write the offset data to file\n", __func__);
+		err = -EIO;
+	}
+
+	filp_close(offset_filp, current->files);
+	set_fs(old_fs);
+	return err;
+}
+
+static void gp2a_thresh_set(struct gp2a_data *gp2a)
+{
+	struct file *offset_filp = NULL;
+	mm_segment_t old_fs;
+    int thrd = 0;
+	int err = 0;
+
+    gp2a->offset_value = gp2a->threshold_high -gp2a_original_image[5][1];
+    thrd = gp2a_original_image[3][1]+(gp2a->offset_value);
+    opt_i2c_write(gp2a_original_image[3][0], &thrd,
+		gp2a->pdata->addr, gp2a->pdata->adapt_num);        
+    thrd = gp2a_original_image[5][1]+(gp2a->offset_value);
+    opt_i2c_write(gp2a_original_image[5][0], &thrd,
+		gp2a->pdata->addr, gp2a->pdata->adapt_num);
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	offset_filp = filp_open(OFFSET_FILE_PATH,
+			O_CREAT | O_TRUNC | O_WRONLY, 0666);
+	if (IS_ERR(offset_filp)) {
+		pr_err("%s: Can't open prox_offset file\n", __func__);
+		set_fs(old_fs);
+		err = PTR_ERR(offset_filp);
+		return err;
+	}
+
+	err = offset_filp->f_op->write(offset_filp,
+		(char *)&gp2a->offset_value, sizeof(u8), &offset_filp->f_pos);
+	if (err != sizeof(u8)) {
+		pr_err("%s: Can't write the offset data to file\n", __func__);
+		err = -EIO;
+	}
+
+	filp_close(offset_filp, current->files);
+	set_fs(old_fs);
+	return err;
+
+}
+
+static ssize_t proximity_cal_store(struct device *dev,
+					  struct device_attribute *attr,
+					  const char *buf, size_t size)
+{
+	bool do_calib;
+	int err;
+
+	if (sysfs_streq(buf, "1")) { /* calibrate cancelation value */
+		do_calib = true;
+	} else if (sysfs_streq(buf, "0")) { /* reset cancelation value */
+		do_calib = false;
+	} else {
+		pr_err("%s: invalid value %d\n", __func__, *buf);
+		return -EINVAL;
+	}
+
+	err = proximity_store_offset(dev, do_calib);
+	if (err < 0) {
+		pr_err("%s: proximity_store_offset() failed\n", __func__);
+		return err;
+	}
+	
+	return size;
+}
+
+static ssize_t proximity_cal_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct gp2a_data *gp2a = dev_get_drvdata(dev);
+	u8 p_offset = 0;
+	int ret = 0;
+	int thresh_hi = 0;
+    unsigned char get_D2_data[2]={0,};
+
+	msleep(20);
+    opt_i2c_read(PS_HT_LSB, get_D2_data, sizeof(get_D2_data),
+		gp2a->pdata->addr, gp2a->pdata->adapt_num);
+    thresh_hi =(get_D2_data[1] << 8) | get_D2_data[0];
+    gp2a->threshold_high = thresh_hi;
+
+	return sprintf(buf, "%d,%d\n", gp2a->offset_value, gp2a->threshold_high);
+}
+
+static ssize_t proximity_thresh_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct gp2a_data *gp2a = dev_get_drvdata(dev);
+	int thresh_hi = 0;
+    unsigned char get_D2_data[2]={0,};//test
+
+	msleep(20);
+    opt_i2c_read(PS_HT_LSB, get_D2_data, sizeof(get_D2_data),
+		gp2a->pdata->addr, gp2a->pdata->adapt_num);
+    thresh_hi =(get_D2_data[1] << 8) | get_D2_data[0];
+	pr_err("%s: THRESHOLD = %d\n", __func__, thresh_hi);
+
+	return sprintf(buf, "prox_threshold = %d\n", thresh_hi);
+}
+
+static ssize_t proximity_thresh_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct gp2a_data *gp2a = dev_get_drvdata(dev);
+	int thresh_value;
+	int err = 0;
+
+    err = strict_strtoll(buf, 10, &thresh_value);
+	if (err < 0)
+	{
+		pr_err("%s, kstrtoint failed.", __func__);
+	}
+	gp2a->threshold_high = thresh_value;
+	gp2a_thresh_set(gp2a);
+	msleep(20);
+
+	return size;
+}
+
+static ssize_t proximity_cal2_store(struct device *dev,
+					  struct device_attribute *attr,
+					  const char *buf, size_t size)
+{
+	int change_on;
+	int err;
+
+	if (sysfs_streq(buf, "1")) { /* change hi threshold by -2 */
+		change_on = -2;
+	} else if (sysfs_streq(buf, "2")) { /*change hi threshold by +4 */
+		change_on = 4;
+	} else if (sysfs_streq(buf, "3")) { /*change hi threshold by +8 */
+		change_on = 8;
+	}else {
+		pr_err("%s: invalid value %d\n", __func__, *buf);
+		return -EINVAL;
+	}
+	err = proximity_store_offset2(dev, change_on);
+	if (err < 0) {
+		pr_err("%s: proximity_store_offset() failed\n", __func__);
+		return err;
+	}
+
+	return size;
+}
+
+static ssize_t prox_offset_pass_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct gp2a_data *gp2a = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", gp2a->cal_result);
+}                 
+
+static ssize_t prox_read_name(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%s\n", PROXIMITY_NAME);
+}
 
 static struct device_attribute dev_attr_proximity_enable =
 	__ATTR(enable, S_IRUGO|S_IWUSR|S_IWGRP,
@@ -390,6 +755,16 @@ static struct device_attribute dev_attr_proximity_enable =
 static DEVICE_ATTR(prox_avg, S_IRUGO|S_IWUSR,
 	proximity_avg_show, proximity_avg_store);
 static DEVICE_ATTR(state, S_IRUGO|S_IWUSR, proximity_state_show, NULL);
+static DEVICE_ATTR(prox_cal, S_IRUGO | S_IWUSR, proximity_cal_show,
+	proximity_cal_store);
+static DEVICE_ATTR(prox_cal2, S_IRUGO | S_IWUSR, proximity_cal_show,
+	proximity_cal2_store);
+static DEVICE_ATTR(prox_offset_pass, S_IRUGO|S_IWUSR,
+	prox_offset_pass_show, NULL);
+static DEVICE_ATTR(prox_thresh, S_IRUGO | S_IWUSR, proximity_thresh_show,
+	proximity_thresh_store);
+static DEVICE_ATTR(name, S_IRUGO | S_IWUSR, prox_read_name, NULL);
+
 static DEVICE_ATTR(poll_delay, S_IRUGO|S_IWUSR|S_IWGRP,
 	light_delay_show, light_delay_store);
 
@@ -906,7 +1281,7 @@ static void gp2a_work_func_light(struct work_struct *work)
 				lightsensor_onoff(1, data);
 				printk(KERN_INFO "Lightsensor OFF->ON\n");
 			} else
-				data->reset_cnt == LIMIT_RESET_COUNT + 1;
+				data->reset_cnt = LIMIT_RESET_COUNT + 1;
 		}
 	} else {
 		data->reset_cnt = 0;
@@ -942,6 +1317,7 @@ static int gp2a_opt_probe(struct platform_device *pdev)
 
 	}
 
+	gp2a->offset_value = 0;
 	gp2a->pdata = pdata;
 	/* Setup irq */
 	err = gp2a_setup_irq(gp2a);
@@ -1025,6 +1401,7 @@ static int gp2a_opt_probe(struct platform_device *pdev)
 		goto err_sysfs_create_group_light;
 
 	mutex_init(&gp2a->ligt_mutex);
+	mutex_init(&gp2a->data_mutex);
 
 	/* set platdata */
 	platform_set_drvdata(pdev, gp2a);
@@ -1074,11 +1451,41 @@ static int gp2a_opt_probe(struct platform_device *pdev)
 		goto err_proximity_device_create_file2;
 	}
 
+	if (device_create_file(gp2a->proximity_dev, &dev_attr_name) < 0) {
+		pr_err("%s: could not create device file(%s)!\n", __func__,
+		       dev_attr_name.attr.name);
+		goto err_proximity_device_create_file;
+	}
+	
 	if (device_create_file(gp2a->proximity_dev,
 		&dev_attr_proximity_enable) < 0) {
 		pr_err("%s: could not create device file(%s)!\n", __func__,
 		       dev_attr_prox_avg.attr.name);
 		goto err_proximity_device_create_file3;
+	}
+	if (device_create_file(gp2a->proximity_dev,
+		&dev_attr_prox_cal) < 0) {
+		pr_err("%s: could not create device file(%s)!\n", __func__,
+		       dev_attr_prox_cal.attr.name);
+		goto err_proximity_device_create_file4;
+	}
+	if (device_create_file(gp2a->proximity_dev,
+		&dev_attr_prox_cal2) < 0) {
+		pr_err("%s: could not create device file(%s)!\n", __func__,
+		       dev_attr_prox_cal2.attr.name);
+		goto err_proximity_device_create_file5;
+	}
+	if (device_create_file(gp2a->proximity_dev,
+		&dev_attr_prox_offset_pass) < 0) {
+		pr_err("%s: could not create device file(%s)!\n", __func__,
+		       dev_attr_prox_offset_pass.attr.name);
+		goto err_proximity_device_create_file6;
+	}
+	if (device_create_file(gp2a->proximity_dev,
+		&dev_attr_prox_thresh) < 0) {
+		pr_err("%s: could not create device file(%s)!\n", __func__,
+		       dev_attr_prox_thresh.attr.name);
+		goto err_proximity_device_create_file7;
 	}
 
 	if (device_create_file(gp2a->light_dev,
@@ -1106,6 +1513,16 @@ err_light_device_create_file2:
 	device_remove_file(gp2a->light_dev, &dev_attr_lightsensor_lux);
 err_light_device_create_file1:
 	device_remove_file(gp2a->proximity_dev, &dev_attr_proximity_enable);
+err_proximity_device_create_file:
+	device_remove_file(gp2a->proximity_dev, &dev_attr_name);
+err_proximity_device_create_file4:
+	device_remove_file(gp2a->proximity_dev, &dev_attr_prox_cal);
+err_proximity_device_create_file5:
+	device_remove_file(gp2a->proximity_dev, &dev_attr_prox_cal2);
+err_proximity_device_create_file6:
+	device_remove_file(gp2a->proximity_dev, &dev_attr_prox_offset_pass);
+err_proximity_device_create_file7:
+	device_remove_file(gp2a->proximity_dev, &dev_attr_prox_thresh);
 err_proximity_device_create_file3:
 	device_remove_file(gp2a->proximity_dev, &dev_attr_prox_avg);
 err_proximity_device_create_file2:
@@ -1157,6 +1574,11 @@ static int gp2a_opt_remove(struct platform_device *pdev)
 	if (sensors_class != NULL) {
 		device_remove_file(gp2a->proximity_dev, &dev_attr_prox_avg);
 		device_remove_file(gp2a->proximity_dev, &dev_attr_state);
+		device_remove_file(gp2a->proximity_dev, &dev_attr_name);
+		device_remove_file(gp2a->proximity_dev, &dev_attr_prox_cal);
+		device_remove_file(gp2a->proximity_dev, &dev_attr_prox_cal2);
+		device_remove_file(gp2a->proximity_dev, &dev_attr_prox_offset_pass);
+		device_remove_file(gp2a->proximity_dev, &dev_attr_prox_thresh);
 		device_remove_file(gp2a->proximity_dev,
 			&dev_attr_proximity_enable);
 		device_remove_file(gp2a->light_dev, &dev_attr_lightsensor_lux);
@@ -1206,6 +1628,7 @@ static void gp2a_opt_shutdown(struct platform_device *pdev)
 	if (sensors_class != NULL) {
 		device_remove_file(gp2a->proximity_dev, &dev_attr_prox_avg);
 		device_remove_file(gp2a->proximity_dev, &dev_attr_state);
+		device_remove_file(gp2a->proximity_dev, &dev_attr_name);
 		device_remove_file(gp2a->proximity_dev,
 			&dev_attr_proximity_enable);
 		device_remove_file(gp2a->light_dev, &dev_attr_lightsensor_lux);

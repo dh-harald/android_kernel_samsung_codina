@@ -31,7 +31,8 @@
 
 	 
 
-#define PRCMU_DPI_CLK_FREQ	50000000
+/* Taken from the programmed value of the LCD clock in PRCMU */
+#define PRCMU_DPI_CLK_FREQ	80000000 //50000000
 	 
 #ifdef CONFIG_FB_MCDE
 
@@ -397,7 +398,7 @@ static void update_mcde_opp(struct device *dev,
 	 * unless we have an overlay
 	 */
 
-	if ((reqs->num_rot_channels && reqs->num_overlays > 1) ||
+	if ((reqs->num_overlays > 1) ||
 		 (diff < 5000)) {
  		req_ape = PRCMU_QOS_MAX_VALUE;
 		req_ddr = PRCMU_QOS_MAX_VALUE;
@@ -413,7 +414,6 @@ static void update_mcde_opp(struct device *dev,
 		prcmu_qos_update_requirement(PRCMU_QOS_DDR_OPP,
 						dev_name(dev), req_ddr);
 	}
-	prcmu_qos_update_requirement(PRCMU_QOS_APE_OPP, dev_name(dev), req_ape);
 }
 
 int __init init_gavini_display_devices(void)
@@ -421,11 +421,10 @@ int __init init_gavini_display_devices(void)
 	struct mcde_platform_data *pdata = ux500_mcde_device.dev.platform_data;
 
 	int ret;
-
 	ret = mcde_dss_register_notifier(&display_nb);
 	if (ret)
 		pr_warning("Failed to register dss notifier\n");
-		if (system_rev >= GAVINI_R0_3) {
+	if (system_rev >= GAVINI_R0_3) {
 		if (display_initialized_during_boot) {
 			generic_display0_r0_3.power_mode = MCDE_DISPLAY_PM_ON;
 			gavini_dpi_pri_display_info_r0_3.platform_enabled = 1;
@@ -439,22 +438,22 @@ int __init init_gavini_display_devices(void)
 		gavini_dpi_pri_display_info_r0_3.video_mode.pixclock /= \
 						port0.phy.dpi.clock_div;
 
-		//ret = mcde_display_device_register(&generic_display0_r0_3);
+		ret = mcde_display_device_register(&generic_display0_r0_3);
 	} else 
 	{
-	 
-	if (display_initialized_during_boot) {
-		generic_display0.power_mode = MCDE_DISPLAY_PM_ON;
-		gavini_dpi_pri_display_info.platform_enabled = 1;
-	}
+		if (display_initialized_during_boot) {
+			generic_display0.power_mode = MCDE_DISPLAY_PM_ON;
+			gavini_dpi_pri_display_info.platform_enabled = 1;
+		}
 
-	/* 
-	 * The pixclock setting is not used within MCDE. The clock is
-	 * setup elsewhere. But the pixclock value is visible in user
-	 * space.
-	 */
-	gavini_dpi_pri_display_info.video_mode.pixclock /= port0.phy.dpi.clock_div;
-	
+		/* 
+		 * The pixclock setting is not used within MCDE. The clock is
+		 * setup elsewhere. But the pixclock value is visible in user
+		 * space.
+		 */
+		gavini_dpi_pri_display_info.video_mode.pixclock /= port0.phy.dpi.clock_div;
+		
+		ret = mcde_display_device_register(&generic_display0);	
 	}
 		/* MCDE pixelfetchwtrmrk levels in pixels per overlay */
 	{
@@ -463,8 +462,8 @@ int __init init_gavini_display_devices(void)
 	 * The pixel fetcher FIFO is 128*64bit = 8192bits = 1024bytes.
 	 * Overlay 0 is assumed 32bpp and overlay 1 is assumed 16bpp
 	 */
-	pdata->pixelfetchwtrmrk[0] = 160; /* 160 -> 160px*32bpp/8=640bytes */
-	pdata->pixelfetchwtrmrk[1] = 192; /* 192 -> 192px*16bpp/8=384bytes */
+	pdata->pixelfetchwtrmrk[0] = 128;//160; /* 160 -> 160px*32bpp/8=640bytes */
+	pdata->pixelfetchwtrmrk[1] = 128;//192; /* 192 -> 192px*16bpp/8=384bytes */
 #else /* 24 bit overlay */
 	u32 fifo = (1024*8 - 8 * BITS_PER_WORD) / 7;
 	fifo &= ~(BITS_PER_WORD - 1);
@@ -474,7 +473,6 @@ int __init init_gavini_display_devices(void)
 	}
 	pdata->update_opp = update_mcde_opp;
 
-	ret = mcde_display_device_register(&generic_display0);
 	if (ret)
 		pr_warning("Failed to register generic display device 0\n");
 

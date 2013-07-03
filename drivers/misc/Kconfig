@@ -9,6 +9,11 @@ config SENSORS_LIS3LV02D
 	depends on INPUT
 	select INPUT_POLLDEV
 	default n
+	
+config MACH_CODINA_CHN
+	bool "Codina_chn"
+	help
+      Supports Codina_chn boards
 
 menuconfig MISC_DEVICES
 	bool "Misc devices"
