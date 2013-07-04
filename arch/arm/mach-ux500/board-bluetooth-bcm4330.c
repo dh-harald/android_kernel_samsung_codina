@@ -279,9 +279,34 @@ static int bcm4330_bluetooth_remove(struct platform_device *pdev)
 	return 0;
 }
 
+int bcm4430_bluetooth_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	int irq = gpio_to_irq(BT_HOST_WAKE_GTI9060_R0_1);
+	int host_wake;
+
+	disable_irq(irq);
+	host_wake = gpio_get_value(BT_HOST_WAKE_GTI9060_R0_1);
+
+	if (host_wake) {
+		enable_irq(irq);
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
+int bcm4430_bluetooth_resume(struct platform_device *pdev)
+{
+	int irq = gpio_to_irq(BT_HOST_WAKE_GTI9060_R0_1);
+	enable_irq(irq);
+	return 0;
+}
+
 static struct platform_driver bcm4330_bluetooth_platform_driver = {
 	.probe = bcm4330_bluetooth_probe,
 	.remove = bcm4330_bluetooth_remove,
+	.suspend = bcm4430_bluetooth_suspend,
+	.resume = bcm4430_bluetooth_resume,
 	.driver = {
 		   .name = "bcm4330_bluetooth",
 		   .owner = THIS_MODULE,
